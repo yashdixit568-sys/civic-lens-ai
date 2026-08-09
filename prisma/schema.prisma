@@ -1,0 +1,243 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CITIZEN
+  AUTHORITY
+  ADMIN
+}
+
+enum IssueCategory {
+  ROAD_DAMAGE
+  GARBAGE_OVERFLOW
+  WATER_LEAKAGE
+  BROKEN_STREETLIGHT
+  TRAFFIC_SIGNAL_FAILURE
+  ILLEGAL_DUMPING
+  ELECTRIC_POLE_DAMAGE
+  DRAINAGE_PROBLEM
+  WALL_DAMAGE
+  CONSTRUCTION_WASTE
+  ANIMAL_HAZARD
+  OTHER_CIVIC_ISSUE
+}
+
+enum SeverityLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  PENDING
+  MERGED_DUPLICATE
+  ASSIGNED
+  IN_PROGRESS
+  CITIZEN_VERIFICATION
+  RESOLVED
+  REJECTED
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  name            String
+  avatar          String?
+  role            Role           @default(CITIZEN)
+  reputationScore Int            @default(100)
+  tier            String         @default("BRONZE") // BRONZE, SILVER, GOLD, VERIFIED_REPORTER
+  departmentId    String?
+  department      Department?    @relation(fields: [departmentId], references: [id])
+  complaints      Complaint[]    @relation("SubmittedComplaints")
+  assignedJobs    Complaint[]    @relation("AssignedEngineer")
+  votes           Vote[]
+  comments        Comment[]
+  notifications   Notification[]
+  achievements    Achievement[]
+  auditLogs       AuditLog[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Department {
+  id             String      @id @default(uuid())
+  code           String      @unique // PWD, MUNICIPAL_CORP, ELECTRICITY, WATER, TRAFFIC, DRAINAGE
+  name           String
+  description    String
+  headOfficer    String
+  contactEmail   String
+  contactPhone   String
+  slaHours       Int         @default(48)
+  users          User[]
+  complaints     Complaint[]
+  createdAt      DateTime    @default(now())
+}
+
+model Location {
+  id          String      @id @default(uuid())
+  address     String
+  ward        String      // e.g. "Ward 8", "Ward 12"
+  zone        String      // e.g. "North Zone"
+  latitude    Float
+  longitude   Float
+  nearHospital Boolean    @default(false)
+  nearSchool   Boolean    @default(false)
+  trafficDensity String   @default("MODERATE") // LOW, MODERATE, HIGH
+  complaints  Complaint[]
+}
+
+model Complaint {
+  id              String          @id @default(uuid())
+  ticketId        String          @unique
+  title           String
+  description     String
+  category        IssueCategory
+  severity        SeverityLevel   @default(MEDIUM)
+  status          Status          @default(PENDING)
+  priorityScore   Int             @default(50) // 0 - 100
+  confidenceScore Float           @default(0.85)
+  isDuplicate     Boolean         @default(false)
+  duplicateGroupId String?
+  duplicateGroup  DuplicateGroup? @relation(fields: [duplicateGroupId], references: [id])
+  reportCount     Int             @default(1)
+  
+  // Relations
+  citizenId       String
+  citizen         User            @relation("SubmittedComplaints", fields: [citizenId], references: [id])
+  assignedToId    String?
+  assignedTo      User?           @relation("AssignedEngineer", fields: [assignedToId], references: [id])
+  departmentId    String
+  department      Department      @relation(fields: [departmentId], references: [id])
+  locationId      String
+  location        Location        @relation(fields: [locationId], references: [id])
+  
+  // Media & AI
+  imageUrl        String?
+  afterImageUrl   String?
+  audioUrl        String?
+  transcription   String?
+  aiAnalysis      AIAnalysis?
+  proofOfWork     ProofOfWork?
+  
+  votes           Vote[]
+  comments        Comment[]
+  history         ComplaintHistory[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([status])
+  @@index([departmentId])
+  @@index([category])
+  @@index([createdAt])
+  @@index([citizenId])
+}
+
+model DuplicateGroup {
+  id             String      @id @default(uuid())
+  masterId       String
+  totalReports   Int         @default(1)
+  complaints     Complaint[]
+  createdAt      DateTime    @default(now())
+}
+
+model AIAnalysis {
+  id                String    @id @default(uuid())
+  complaintId        String    @unique
+  complaint         Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  detectedObject    String
+  visualSeverityScore Int
+  impactAssessment  String
+  riskLevel         SeverityLevel
+  suggestedAction   String
+  hinglishParsedText String?
+  weatherImpact     String?
+  floodRiskScore    Int       @default(0)
+  createdAt         DateTime  @default(now())
+}
+
+model ProofOfWork {
+  id               String    @id @default(uuid())
+  complaintId       String    @unique
+  complaint        Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  beforeImageUrl   String
+  afterImageUrl    String
+  officialNotes    String
+  aiVerificationScore Float  @default(0.92)
+  verifiedAt       DateTime  @default(now())
+}
+
+model ComplaintHistory {
+  id          String   @id @default(uuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  status      Status
+  actorName   String
+  note        String
+  timestamp   DateTime @default(now())
+
+  @@index([complaintId])
+}
+
+model Vote {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  type        String   @default("UPVOTE")
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, complaintId])
+}
+
+model Comment {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  content     String
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Achievement {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  badgeCode   String   // VERIFIED_REPORTER, GOLD_CITIZEN, SILVER_CITIZEN, BRONZE_CITIZEN
+  description String
+  earnedAt    DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  resource  String
+  details   String
+  ipAddress String?
+  timestamp DateTime @default(now())
+}
